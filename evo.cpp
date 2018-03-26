@@ -27,20 +27,25 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 
 	// Track detected features
 	std::vector<cv::Point2f> pts;
-	cv::Mat st;
+	std::vector<bool> is_tracked;
 	cv::Mat err;
-	cv::calcOpticalFlowPyrLK(this->prev_img, image, this->prev_pts, pts, st, err,
-			cv::Size(15,15)); // See Kelly et al., 2008 for window size
+	cv::calcOpticalFlowPyrLK(this->prev_img, image, this->prev_pts, pts, is_tracked, err,
+			cv::Size(15,15)); // See Kelly et al., 2008 for window size.
 
 	image.copyTo(this->prev_img);
 	this->prev_pts = pts;
 
+	// Remove outliers using fundamental matrix
+	std::vector<bool> is_inlier;
+	cv::findFundamentalMat(this->prev_pts, pts, is_inlier, CV_FM_LMEDS);
+
 	// DEBUG output
 	cv::Mat debug;
 	image.copyTo(debug);
-	for(std::vector<cv::Point2f>::iterator it = pts.begin();
-			it != pts.end(); ++it) {
-		cv::circle(debug, *it, 2, cv::Scalar(0, 255, 0));
+	for(int i = 0; i < pts.size(); ++i) {
+		if(is_tracked[i] && is_inlier[i]) {
+			cv::circle(debug, pts[i], 2, cv::Scalar(0, 255, 0));
+		}
 	}
 	cv::imshow("keypoints", debug);
 	std::cout << "Keypts: " << pts.size() << std::endl;
