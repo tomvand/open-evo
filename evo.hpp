@@ -1,5 +1,7 @@
 #include <opencv2/opencv.hpp>
 
+#include <vector>
+
 namespace openevo {
 
 class EVO {
@@ -14,7 +16,10 @@ public:
 //	void updateImageDisparity(void); // TODO
 
 private:
+	bool initialized;
 	cv::Ptr<cv::FeatureDetector> detector;
+	std::vector<cv::Point2f> prev_pts;
+	cv::Mat prev_img;
 };
 
 }
