@@ -1,7 +1,10 @@
 #include "evo.hpp"
 
 #include <vector>
+
+#ifdef DEBUG
 #include <iostream>
+#endif
 
 namespace openevo {
 
@@ -39,7 +42,7 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 	std::vector<bool> is_inlier;
 	cv::findFundamentalMat(this->prev_pts, pts, is_inlier, CV_FM_LMEDS);
 
-	// DEBUG output
+#ifdef DEBUG
 	cv::Mat debug;
 	image.copyTo(debug);
 	for(int i = 0; i < pts.size(); ++i) {
@@ -49,6 +52,7 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 	}
 	cv::imshow("keypoints", debug);
 	std::cout << "Keypts: " << pts.size() << std::endl;
+#endif
 }
 
 EVO::~EVO(void) { }
