@@ -17,6 +17,35 @@ void profile_printf(const char *s) {
 #include "libProfiler/libProfiler.h" // Included outside DEBUG to provide empty macros
 
 
+namespace {
+
+template<class T1, class T2>
+void filter_vector(std::vector<T1> &vec, const std::vector<T2> &keep) {
+	assert(keep.size() == vec.size());
+	PROFILER_START(filter_vector);
+	int ikeep = 0;
+	for(int iread = 0; iread != keep.size();){
+		if(keep[iread]) {
+			vec[ikeep] = vec[iread];
+			++ikeep;
+		}
+		++iread;
+	}
+	vec.resize(ikeep); // Note: does not reallocate vector
+
+#ifdef DEBUG
+	int sum = 0;
+	for(int i = 0; i < keep.size(); ++i) {
+		if(keep[i]) ++sum;
+	}
+	assert(ikeep == sum);
+#endif
+	PROFILER_END(); // filter_vector
+}
+
+} // namespace
+
+
 namespace openevo {
 
 EVO::EVO(void) :
@@ -36,29 +65,44 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 	PROFILER_START(updateImageDepth);
 
 	if(this->keyframe.size() > 0) {
+		PROFILER_START(update_pose);
+
 		// Track features
-		//	Remove lost features from lists incl keyframe
+		PROFILER_START(track);
+		std::vector<cv::Point2f> prev_pts(this->tracked_pts);
+		std::vector<uchar> is_tracked;
+		cv::Mat err;
+		cv::calcOpticalFlowPyrLK(this->prev_img, image, prev_pts, this->tracked_pts,
+				is_tracked, err, cv::Size(15,15), 1); // See Kelly et al., 2008 for window size.
+		// Remove keypoints that were lost during tracking
+		filter_vector(prev_pts, is_tracked);
+		filter_vector(this->tracked_pts, is_tracked);
+		filter_vector(this->keyframe, is_tracked);
+		PROFILER_END();
+#ifdef DEBUG
+		std::cout << "Tracked points: " << this->tracked_pts.size() << std::endl;
+#endif
+
+		// Filter outliers
 		// Compute pose
+		// Keep track of previous data
+		PROFILER_START(copy);
+		image.copyTo(this->prev_img);
+		PROFILER_END();
 		// If not new keyframe
 		//	Predict features
+		PROFILER_END(); // update_pose
 		//	return; // Skip keyframe update
 	}
 
-	if(this->keyframe.size() < 999) { // TODO check below threshold
+	if(this->keyframe.size() < 200) { // TODO check threshold
 		this->updateKeyframe(image, depth);
 	}
 
 	std::cout << "Keypoints: " << this->keyframe.size() << std::endl;
+	image.copyTo(this->prev_img); // XXX
 
 
-//	PROFILER_START(track);
-//	// Track detected features
-//	std::vector<cv::Point2f> pts;
-//	std::vector<bool> is_tracked;
-//	cv::Mat err;
-//	cv::calcOpticalFlowPyrLK(this->prev_img, image, this->prev_pts, pts, is_tracked, err,
-//			cv::Size(15,15)); // See Kelly et al., 2008 for window size.
-//	PROFILER_END();
 //
 //	PROFILER_START(fcheck);
 //	// Remove outliers using fundamental matrix
@@ -66,18 +110,15 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 //	cv::findFundamentalMat(this->prev_pts, pts, is_inlier, CV_FM_LMEDS);
 //	PROFILER_END();
 //
-//	PROFILER_START(copy);
-//	image.copyTo(this->prev_img);
-//	this->prev_pts = pts;
-//	PROFILER_END();
+
 
 	PROFILER_END(); // updateImageDepth
 
 #ifdef DEBUG
 	cv::Mat debug;
 	image.copyTo(debug);
-	for(int i = 0; i < this->prev_pts.size(); ++i) {
-		cv::circle(debug, this->prev_pts[i], 2, cv::Scalar(0, 255, 0));
+	for(int i = 0; i < this->tracked_pts.size(); ++i) {
+		cv::circle(debug, this->tracked_pts[i], 2, cv::Scalar(0, 255, 0));
 	}
 	cv::imshow("keypoints", debug);
 #endif
@@ -99,16 +140,17 @@ void EVO::updateKeyframe(const cv::Mat &image, const cv::Mat &depth) {
 	PROFILER_END();
 	PROFILER_START(filter_keyframe);
 	int ratio = image.cols / depth.cols; // Assume integer ratio between image and depth map size
-	std::vector<bool> depth_available(this->prev_pts.size());
-	for(int i = 0; i < this->prev_pts.size(); ++i) {
-		int depth_x = this->prev_pts[i].x / ratio;
-		int depth_y = this->prev_pts[i].y / ratio;
+	std::vector<bool> depth_available(this->tracked_pts.size());
+	for(int i = 0; i < this->tracked_pts.size(); ++i) {
+		int depth_x = this->tracked_pts[i].x / ratio;
+		int depth_y = this->tracked_pts[i].y / ratio;
 		depth_available[i] =
 				depth_x > 0 && depth_x < depth_mask.cols &&
 				depth_y > 0 && depth_y < depth_mask.rows &&
-				depth_mask.at<char>(depth_y, depth_x);
+				depth_mask.at<uchar>(depth_y, depth_x);
 	}
-	this->filterKeyframe(depth_available);
+	filter_vector(this->keyframe, depth_available);
+	filter_vector(this->tracked_pts, depth_available);
 	PROFILER_END();
 
 	// Detect new keypoints
@@ -125,9 +167,9 @@ void EVO::updateKeyframe(const cv::Mat &image, const cv::Mat &depth) {
 
 	// Store 3D coords in keyframe
 	PROFILER_START(update_keyframe);
-	this->prev_pts.insert(this->prev_pts.end(), new_pts.begin(), new_pts.end());
-	this->keyframe.resize(this->prev_pts.size());
-	for(int i = 0; i < this->prev_pts.size(); ++i) {
+	this->tracked_pts.insert(this->tracked_pts.end(), new_pts.begin(), new_pts.end());
+	this->keyframe.resize(this->tracked_pts.size());
+	for(int i = 0; i < this->tracked_pts.size(); ++i) {
 		this->keyframe[i].x = 0.0; // TODO, maybe reprojectto3d?
 		this->keyframe[i].y = 0.0;
 		this->keyframe[i].z = 0.0;
@@ -135,34 +177,8 @@ void EVO::updateKeyframe(const cv::Mat &image, const cv::Mat &depth) {
 	PROFILER_END();
 
 	PROFILER_END(); // updateKeyframe
+	assert(this->tracked_pts.size() == this->keyframe.size());
 }
 
-void EVO::filterKeyframe(std::vector<bool> keep) {
-	PROFILER_START(filterKeyframe);
-
-	assert(keep.size() == this->prev_pts.size());
-	assert(keep.size() == this->keyframe.size());
-
-	int ikeep = 0;
-	for(int iread = 0; iread != keep.size();){
-		if(keep[iread]) {
-			this->prev_pts[ikeep] = this->prev_pts[iread];
-			this->keyframe[ikeep] = this->keyframe[iread];
-			++ikeep;
-		}
-		++iread;
-	}
-	this->prev_pts.resize(ikeep); // Note: does not reallocate vector
-	this->keyframe.resize(ikeep);
-
-#ifdef DEBUG
-	int sum = 0;
-	for(int i = 0; i < keep.size(); ++i) {
-		if(keep[i]) ++sum;
-	}
-	assert(ikeep == sum);
-#endif
-	PROFILER_END(); // filterKeyframe
-}
 
 } // namespace openevo

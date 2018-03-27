@@ -19,13 +19,12 @@ private:
 	int max_features;
 
 	void updateKeyframe(const cv::Mat &image, const cv::Mat &depth);
-	void filterKeyframe(std::vector<bool> keep);
 
 	cv::Ptr<cv::FeatureDetector> detector;
 
 	std::vector<cv::Point3f> keyframe;
 
-	std::vector<cv::Point2f> prev_pts;
+	std::vector<cv::Point2f> tracked_pts;
 	cv::Mat prev_img;
 };
 
