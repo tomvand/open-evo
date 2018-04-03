@@ -74,7 +74,9 @@ EVO::EVO(void) :
 				6,
 				8)),
 		max_features(350),
-		near_clip(1.5)
+		near_clip(1.5),
+		keyframe_thres(0.8),
+		keyframe_init_num_features(9999)
 {
 	PROFILER_ENABLE;
 }
@@ -146,7 +148,7 @@ void EVO::updateImageDepth(
 		//	return; // Skip keyframe update
 	}
 
-	if(this->keyframe.size() < 200) { // TODO check threshold
+	if(this->keyframe.size() < this->keyframe_thres * this->keyframe_init_num_features) {
 		this->updateKeyframe(image, depth, intrinsic);
 	}
 
@@ -157,7 +159,7 @@ void EVO::updateImageDepth(
 
 #ifdef DEBUG
 	cv::Mat debug;
-	image.copyTo(debug);
+	cv::cvtColor(image, debug, CV_GRAY2BGR);
 	for(int i = 0; i < this->tracked_pts.size(); ++i) {
 		int radius = 10.0 / this->keyframe[i].z;
 		std::ostringstream ss;
@@ -225,7 +227,7 @@ void EVO::updateKeyframe(
 	std::vector<cv::KeyPoint> new_kp;
 	std::vector<cv::Point2f> new_pts;
 	this->detector->set("maxTotalKeypoints", num_new_kp);
-	this->detector->detect(image, new_kp, image_mask); // TODO add depth mask
+	this->detector->detect(image, new_kp, image_mask);
 	cv::KeyPoint::convert(new_kp, new_pts);
 	PROFILER_END();
 
@@ -246,6 +248,7 @@ void EVO::updateKeyframe(
 		this->keyframe[i].y = (this->tracked_pts[i].y - cy) / fy * z;
 		this->keyframe[i].z = z;
 	}
+	this->keyframe_init_num_features = this->keyframe.size();
 	PROFILER_END();
 
 	PROFILER_END(); // updateKeyframe

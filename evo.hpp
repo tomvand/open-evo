@@ -22,6 +22,9 @@ private:
 	int max_features;
 	double near_clip;
 
+	double keyframe_thres;
+	int keyframe_init_num_features;
+
 	void updateKeyframe(
 			const cv::Mat &image,
 			const cv::Mat &depth,
