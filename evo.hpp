@@ -11,14 +11,20 @@ public:
 
 	void updateIMU(void);
 
-	void updateImageDepth(const cv::Mat &image, const cv::Mat &depth);
+	void updateImageDepth(
+			const cv::Mat &image,
+			const cv::Mat &depth,
+			cv::InputArray intrinsic);
 //	void updateImagePair(void); // TODO
 //	void updateImageDisparity(void); // TODO
 
 private:
 	int max_features;
 
-	void updateKeyframe(const cv::Mat &image, const cv::Mat &depth);
+	void updateKeyframe(
+			const cv::Mat &image,
+			const cv::Mat &depth,
+			cv::InputArray intrinsic);
 
 	cv::Ptr<cv::FeatureDetector> detector;
 

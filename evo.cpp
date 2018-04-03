@@ -4,7 +4,9 @@
 
 
 #ifdef DEBUG
+#include <sstream>
 #include <iostream>
+#include <iomanip>
 
 #include <cstdio>
 #include <unistd.h>
@@ -48,6 +50,7 @@ void filter_vector(std::vector<T1> &vec, const std::vector<T2> &keep) {
 
 namespace openevo {
 
+
 EVO::EVO(void) :
 		detector(new cv::GridAdaptedFeatureDetector(
 				new cv::FastFeatureDetector(1),
@@ -59,11 +62,15 @@ EVO::EVO(void) :
 	PROFILER_ENABLE;
 }
 
+
 EVO::~EVO(void) { }
 
-void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
-	PROFILER_START(updateImageDepth);
 
+void EVO::updateImageDepth(
+		const cv::Mat &image,
+		const cv::Mat &depth,
+		cv::InputArray intrinsic) {
+	PROFILER_START(updateImageDepth);
 	if(this->keyframe.size() > 0) {
 		PROFILER_START(update_pose);
 
@@ -80,7 +87,7 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 		filter_vector(this->keyframe, is_tracked);
 		PROFILER_END();
 #ifdef DEBUG
-		std::cout << "Tracked points: " << this->tracked_pts.size() << std::endl;
+		std::cerr << "Tracked points: " << this->tracked_pts.size() << std::endl;
 #endif
 
 		// Filter outliers
@@ -96,10 +103,10 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 	}
 
 	if(this->keyframe.size() < 200) { // TODO check threshold
-		this->updateKeyframe(image, depth);
+		this->updateKeyframe(image, depth, intrinsic);
 	}
 
-	std::cout << "Keypoints: " << this->keyframe.size() << std::endl;
+	std::cerr << "Keypoints: " << this->keyframe.size() << std::endl;
 	image.copyTo(this->prev_img); // XXX
 
 
@@ -118,7 +125,13 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 	cv::Mat debug;
 	image.copyTo(debug);
 	for(int i = 0; i < this->tracked_pts.size(); ++i) {
-		cv::circle(debug, this->tracked_pts[i], 2, cv::Scalar(0, 255, 0));
+		int radius = 10.0 / this->keyframe[i].z;
+		std::ostringstream ss;
+		ss << std::fixed << std::setprecision(1) << this->keyframe[i].z;
+		cv::circle(debug, this->tracked_pts[i], radius, cv::Scalar(0, 255, 0));
+		cv::putText(debug, ss.str(),
+				cv::Point(this->tracked_pts[i].x + 10, this->tracked_pts[i].y + 3),
+				cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(0, 255, 0));
 	}
 	cv::imshow("keypoints", debug);
 #endif
@@ -126,9 +139,20 @@ void EVO::updateImageDepth(const cv::Mat &image, const cv::Mat &depth) {
 	LogProfiler();
 }
 
-void EVO::updateKeyframe(const cv::Mat &image, const cv::Mat &depth) {
-	PROFILER_START(updateKeyframe);
 
+void EVO::updateKeyframe(
+		const cv::Mat &image,
+		const cv::Mat &depth,
+		cv::InputArray intrinsic) {
+	PROFILER_START(updateKeyframe);
+	// Convert input args
+	assert(depth.type() == CV_32F);
+	cv::Mat intr = intrinsic.getMat();
+	assert(intr.type() == CV_64F && intr.size() == cv::Size(3, 3));
+	const double fx = intr.at<double>(0, 0);
+	const double fy = intr.at<double>(1, 1);
+	const double cx = intr.at<double>(0, 2);
+	const double cy = intr.at<double>(1, 2);
 	// Remove remaining keypoints if no depth information is available anymore
 	PROFILER_START(depth_mask);
 	cv::Mat depth_mask(depth.rows, depth.cols, CV_8UC1);
@@ -170,9 +194,17 @@ void EVO::updateKeyframe(const cv::Mat &image, const cv::Mat &depth) {
 	this->tracked_pts.insert(this->tracked_pts.end(), new_pts.begin(), new_pts.end());
 	this->keyframe.resize(this->tracked_pts.size());
 	for(int i = 0; i < this->tracked_pts.size(); ++i) {
-		this->keyframe[i].x = 0.0; // TODO, maybe reprojectto3d?
-		this->keyframe[i].y = 0.0;
-		this->keyframe[i].z = 0.0;
+		int depth_x = this->tracked_pts[i].x / ratio;
+		int depth_y = this->tracked_pts[i].y / ratio;
+		float z = depth.at<float>(depth_y, depth_x);
+		if(!std::isfinite(z)) {
+			std::cerr << "ERROR: depth " << z << "at (" << depth_x << ", "
+					<< depth_y << ") is not finite!" << std::endl;
+			continue;
+		}
+		this->keyframe[i].x = (this->tracked_pts[i].x - cx) / fx * z;
+		this->keyframe[i].y = (this->tracked_pts[i].y - cy) / fy * z;
+		this->keyframe[i].z = z;
 	}
 	PROFILER_END();
 
