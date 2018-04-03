@@ -108,7 +108,14 @@ void EVO::updateImageDepth(
 #endif
 
 		// Filter outliers
-		// TODO see cv::norm and cv::findFundamentalMat
+//		PROFILER_START(fcheck);
+//		std::vector<uchar> is_inlier;
+//		cv::findFundamentalMat(prev_pts, this->tracked_pts, is_inlier, CV_FM_LMEDS);
+//		filter_vector(prev_pts, is_inlier); // Necessary?
+//		filter_vector(this->tracked_pts, is_inlier);
+//		filter_vector(this->keyframe, is_inlier);
+//		PROFILER_END();
+
 		// Compute pose
 		PROFILER_START(compute_pose);
 		cv::Mat rvec;
@@ -145,16 +152,6 @@ void EVO::updateImageDepth(
 
 	std::cerr << "Keypoints: " << this->keyframe.size() << std::endl;
 	image.copyTo(this->prev_img); // XXX
-
-
-//
-//	PROFILER_START(fcheck);
-//	// Remove outliers using fundamental matrix
-//	std::vector<bool> is_inlier;
-//	cv::findFundamentalMat(this->prev_pts, pts, is_inlier, CV_FM_LMEDS);
-//	PROFILER_END();
-//
-
 
 	PROFILER_END(); // updateImageDepth
 
