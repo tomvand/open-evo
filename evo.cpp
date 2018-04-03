@@ -45,6 +45,22 @@ void filter_vector(std::vector<T1> &vec, const std::vector<T2> &keep) {
 	PROFILER_END(); // filter_vector
 }
 
+
+template<class T1, class T2>
+void select_vector(std::vector<T1> &vec, const std::vector<T2> &select) {
+#ifdef DEBUG
+	for(int i = 1; i < select.size(); ++i) {
+		assert(select[i] > select[i-1]); // select should be sorted, no duplicates
+	}
+#endif
+	int ivec = 0;
+	for(int i = 0; i < select.size(); ++i) {
+		vec[ivec++] = vec[select[i]]; // Note: select[i] >= ivec when select is sorted
+	}
+	vec.resize(ivec);
+	assert(vec.size() == select.size());
+}
+
 } // namespace
 
 
@@ -57,7 +73,8 @@ EVO::EVO(void) :
 				0, // Set in EVO::updateKeyframe
 				6,
 				8)),
-		max_features(350)
+		max_features(350),
+		near_clip(1.5)
 {
 	PROFILER_ENABLE;
 }
@@ -91,7 +108,27 @@ void EVO::updateImageDepth(
 #endif
 
 		// Filter outliers
+		// TODO see cv::norm and cv::findFundamentalMat
 		// Compute pose
+		PROFILER_START(compute_pose);
+		cv::Mat rvec;
+		cv::Mat tvec;
+		std::vector<int> inlier_idxs;
+		// Coarse estimation using P3P, find inliers
+		cv::solvePnPRansac(this->keyframe, this->tracked_pts, intrinsic,
+				std::vector<double>(), rvec, tvec, false, 100, 8.0, 100, inlier_idxs, CV_P3P);
+		// Remove outliers
+		select_vector(this->keyframe, inlier_idxs);
+		select_vector(this->tracked_pts, inlier_idxs);
+		// Fine pose estimation
+		cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
+				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
+		PROFILER_END();
+#ifdef DEBUG
+		std::cerr << "inliers = " << inlier_idxs.size() << std::endl;
+		std::cerr << std::fixed << std::setprecision(2) << "rvec = " << rvec << std::endl;
+		std::cerr << std::fixed << std::setprecision(2) << "tvec = " << tvec << std::endl;
+#endif
 		// Keep track of previous data
 		PROFILER_START(copy);
 		image.copyTo(this->prev_img);
@@ -148,18 +185,24 @@ void EVO::updateKeyframe(
 	// Convert input args
 	assert(depth.type() == CV_32F);
 	cv::Mat intr = intrinsic.getMat();
-	assert(intr.type() == CV_64F && intr.size() == cv::Size(3, 3));
+	assert(intr.type() == CV_64F);
+	assert(intr.size() == cv::Size(3, 3));
 	const double fx = intr.at<double>(0, 0);
 	const double fy = intr.at<double>(1, 1);
 	const double cx = intr.at<double>(0, 2);
 	const double cy = intr.at<double>(1, 2);
+	assert(fx != 0 && fy != 0 && cx != 0 && cy != 0);
+#ifdef DEBUG
+	std::cerr << "intr = " << intr << std::endl;
+	std::cerr << "fx = " << fx << ", fy = " << fy << ", cx = " << cx << ", cy = " << cy << std::endl;
+#endif
 	// Remove remaining keypoints if no depth information is available anymore
 	PROFILER_START(depth_mask);
 	cv::Mat depth_mask(depth.rows, depth.cols, CV_8UC1);
 	cv::Mat image_mask(image.rows, image.cols, CV_8UC1);
-	depth_mask = (depth == depth); // Filter unknown (NaN)
-	depth_mask &= (depth > 0.0);   // Filter too close (-Inf)
-	depth_mask &= (depth < 1.0e6); // Filter too far (+Inf)
+	depth_mask = (depth == depth); 				// Filter unknown (NaN)
+	depth_mask &= (depth > this->near_clip);	// Filter too close (-Inf)
+	depth_mask &= (depth < 1.0e6);				// Filter too far (+Inf)
 	cv::resize(depth_mask, image_mask, image_mask.size(), 0, 0, cv::INTER_NEAREST);
 	PROFILER_END();
 	PROFILER_START(filter_keyframe);

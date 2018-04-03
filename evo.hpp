@@ -20,6 +20,7 @@ public:
 
 private:
 	int max_features;
+	double near_clip;
 
 	void updateKeyframe(
 			const cv::Mat &image,
