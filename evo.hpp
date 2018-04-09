@@ -10,6 +10,7 @@ public:
 	virtual ~EVO(void);
 
 	void getPose(cv::Mat &rvec, cv::Mat &tvec);
+	void getRates(cv::Mat &vel, cv::Mat &rates);
 
 	void updateIMU(void);
 	void updateImageDepth(

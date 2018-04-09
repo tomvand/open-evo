@@ -111,6 +111,12 @@ void EVO::getPose(cv::Mat &rvec, cv::Mat &tvec) {
 }
 
 
+void EVO::getRates(cv::Mat &vel, cv::Mat &rates) {
+	this->vel.copyTo(vel);
+	this->rates.copyTo(rates);
+}
+
+
 void EVO::updateImageDepth(
 		const cv::Mat &image,
 		const cv::Mat &depth,
