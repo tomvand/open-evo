@@ -9,6 +9,8 @@ public:
 	EVO(void);
 	virtual ~EVO(void);
 
+	void getPose(cv::Mat &rvec, cv::Mat &tvec);
+
 	void updateIMU(void);
 	void updateImageDepth(
 			const cv::Mat &image,
@@ -18,11 +20,12 @@ public:
 //	void updateImageDisparity(void); // TODO
 
 private:
-	int max_features;
+	int target_keypts;
 	double near_clip;
 
 	double keyframe_thres;
-	int keyframe_init_num_features;
+	double valid_thres;
+	int keypts_at_keyframe_init;
 
 	void updateKeyframe(
 			const cv::Mat &image,

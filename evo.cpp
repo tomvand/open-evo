@@ -73,20 +73,28 @@ EVO::EVO(void) :
 				0, // Set in EVO::updateKeyframe
 				6,
 				8)),
-		max_features(350),
+		target_keypts(350),
 		near_clip(1.5),
 		keyframe_thres(0.8),
-		keyframe_init_num_features(9999),
-		key_r(cv::Mat::zeros(3, 1, CV_32F)),
-		key_t(cv::Mat::zeros(3, 1, CV_32F)),
-		cam_r(cv::Mat::zeros(3, 1, CV_32F)),
-		cam_t(cv::Mat::zeros(3, 1, CV_32F))
+		valid_thres(0.25),
+		keypts_at_keyframe_init(9999),
+		key_r(cv::Mat::zeros(3, 1, CV_64F)),
+		key_t(cv::Mat::zeros(3, 1, CV_64F)),
+		cam_r(cv::Mat::zeros(3, 1, CV_64F)),
+		cam_t(cv::Mat::zeros(3, 1, CV_64F))
 {
+	this->key_r.at<double>(0, 0) = -M_PI / 2.0;
 	PROFILER_ENABLE;
 }
 
 
 EVO::~EVO(void) { }
+
+
+void EVO::getPose(cv::Mat &rvec, cv::Mat &tvec) {
+	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
+			rvec, tvec);
+}
 
 
 void EVO::updateImageDepth(
@@ -137,14 +145,22 @@ void EVO::updateImageDepth(
 		cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
 				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
 		// Update pose of camera in keyframe
-		cv::Mat R;
-		cv::Rodrigues(rvec, R);
-		cv::transpose(R, R);
-		this->cam_t = -R * tvec;
-		cv::Rodrigues(R, this->cam_r);
+		if(this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init) {
+			cv::Mat R;
+			cv::Rodrigues(rvec, R);
+			cv::transpose(R, R);
+			this->cam_t = -R * tvec;
+			cv::Rodrigues(R, this->cam_r);
+		}
+#ifdef DEBUG
+		else {
+			std::cerr << "WARNING! Not enough features left: "
+					<< this->tracked_pts.size() << ". Ignoring..." << std::endl;
+		}
+#endif
 		PROFILER_END();
 #ifdef DEBUG
-		std::cerr << "inliers = " << inlier_idxs.size() << std::endl;
+		std::cerr << "Remaining points = " << this->tracked_pts.size() << std::endl;
 #endif
 		// Keep track of previous data
 		PROFILER_START(copy);
@@ -156,7 +172,7 @@ void EVO::updateImageDepth(
 		//	return; // Skip keyframe update
 	}
 
-	if(this->keyframe.size() < this->keyframe_thres * this->keyframe_init_num_features) {
+	if(this->keyframe.size() < this->keyframe_thres * this->keypts_at_keyframe_init) {
 		this->updateKeyframe(image, depth, intrinsic);
 	}
 
@@ -182,8 +198,7 @@ void EVO::updateImageDepth(
 
 	// Print cam pose in world
 	cv::Mat camw_r, camw_t;
-	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
-			camw_r, camw_t);
+	this->getPose(camw_r, camw_t);
 	std::cerr << "cam r: " << camw_r << std::endl;
 	std::cerr << "cam t: " << camw_t << std::endl;
 #endif
@@ -237,7 +252,7 @@ void EVO::updateKeyframe(
 
 	// Detect new keypoints
 	PROFILER_START(detect_keypoints);
-	int num_new_kp = this->max_features - this->keyframe.size();
+	int num_new_kp = this->target_keypts - this->keyframe.size();
 	if(num_new_kp <= 0) return;
 
 	std::vector<cv::KeyPoint> new_kp;
@@ -264,15 +279,14 @@ void EVO::updateKeyframe(
 		this->keyframe[i].y = (this->tracked_pts[i].y - cy) / fy * z;
 		this->keyframe[i].z = z;
 	}
-	this->keyframe_init_num_features = this->keyframe.size();
+	this->keypts_at_keyframe_init = this->keyframe.size();
 	PROFILER_END();
 
 	// Update keyframe pose in world, zero cam pose in keyframe
 	PROFILER_START(update_pose);
-	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
-			this->key_r, this->key_t);
-	this->cam_r = cv::Mat::zeros(3, 1, CV_32F);
-	this->cam_t = cv::Mat::zeros(3, 1, CV_32F);
+	this->getPose(this->key_r, this->key_t);
+	this->cam_r = cv::Mat::zeros(3, 1, CV_64F);
+	this->cam_t = cv::Mat::zeros(3, 1, CV_64F);
 	PROFILER_END();
 
 	PROFILER_END(); // updateKeyframe
