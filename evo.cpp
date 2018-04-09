@@ -76,7 +76,11 @@ EVO::EVO(void) :
 		max_features(350),
 		near_clip(1.5),
 		keyframe_thres(0.8),
-		keyframe_init_num_features(9999)
+		keyframe_init_num_features(9999),
+		key_r(cv::Mat::zeros(3, 1, CV_32F)),
+		key_t(cv::Mat::zeros(3, 1, CV_32F)),
+		cam_r(cv::Mat::zeros(3, 1, CV_32F)),
+		cam_t(cv::Mat::zeros(3, 1, CV_32F))
 {
 	PROFILER_ENABLE;
 }
@@ -91,7 +95,7 @@ void EVO::updateImageDepth(
 		cv::InputArray intrinsic) {
 	PROFILER_START(updateImageDepth);
 	if(this->keyframe.size() > 0) {
-		PROFILER_START(update_pose);
+		PROFILER_START(updatePose);
 
 		// Track features
 		PROFILER_START(track);
@@ -120,7 +124,7 @@ void EVO::updateImageDepth(
 
 		// Compute pose
 		PROFILER_START(compute_pose);
-		cv::Mat rvec;
+		cv::Mat rvec; // Note: rvec, tvec are keyframe pose in camera frame.
 		cv::Mat tvec;
 		std::vector<int> inlier_idxs;
 		// Coarse estimation using P3P, find inliers
@@ -132,11 +136,15 @@ void EVO::updateImageDepth(
 		// Fine pose estimation
 		cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
 				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
+		// Update pose of camera in keyframe
+		cv::Mat R;
+		cv::Rodrigues(rvec, R);
+		cv::transpose(R, R);
+		this->cam_t = -R * tvec;
+		cv::Rodrigues(R, this->cam_r);
 		PROFILER_END();
 #ifdef DEBUG
 		std::cerr << "inliers = " << inlier_idxs.size() << std::endl;
-		std::cerr << std::fixed << std::setprecision(2) << "rvec = " << rvec << std::endl;
-		std::cerr << std::fixed << std::setprecision(2) << "tvec = " << tvec << std::endl;
 #endif
 		// Keep track of previous data
 		PROFILER_START(copy);
@@ -158,6 +166,7 @@ void EVO::updateImageDepth(
 	PROFILER_END(); // updateImageDepth
 
 #ifdef DEBUG
+	// Show tracked points
 	cv::Mat debug;
 	cv::cvtColor(image, debug, CV_GRAY2BGR);
 	for(int i = 0; i < this->tracked_pts.size(); ++i) {
@@ -170,6 +179,13 @@ void EVO::updateImageDepth(
 				cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(0, 255, 0));
 	}
 	cv::imshow("keypoints", debug);
+
+	// Print cam pose in world
+	cv::Mat camw_r, camw_t;
+	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
+			camw_r, camw_t);
+	std::cerr << "cam r: " << camw_r << std::endl;
+	std::cerr << "cam t: " << camw_t << std::endl;
 #endif
 
 	LogProfiler();
@@ -249,6 +265,14 @@ void EVO::updateKeyframe(
 		this->keyframe[i].z = z;
 	}
 	this->keyframe_init_num_features = this->keyframe.size();
+	PROFILER_END();
+
+	// Update keyframe pose in world, zero cam pose in keyframe
+	PROFILER_START(update_pose);
+	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
+			this->key_r, this->key_t);
+	this->cam_r = cv::Mat::zeros(3, 1, CV_32F);
+	this->cam_t = cv::Mat::zeros(3, 1, CV_32F);
 	PROFILER_END();
 
 	PROFILER_END(); // updateKeyframe
