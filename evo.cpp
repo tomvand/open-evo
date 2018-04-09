@@ -61,6 +61,17 @@ void select_vector(std::vector<T1> &vec, const std::vector<T2> &select) {
 	assert(vec.size() == select.size());
 }
 
+
+void invert_pose(const cv::Mat &rvec_in, const cv::Mat &tvec_in,
+		cv::Mat &rvec_out, cv::Mat &tvec_out) {
+	cv::Mat R;
+	cv::Rodrigues(rvec_in, R);
+	cv::transpose(R, R);
+	cv::Rodrigues(R, rvec_out);
+	tvec_out = -R * tvec_in;
+}
+
+
 } // namespace
 
 
@@ -81,7 +92,10 @@ EVO::EVO(void) :
 		key_r(cv::Mat::zeros(3, 1, CV_64F)),
 		key_t(cv::Mat::zeros(3, 1, CV_64F)),
 		cam_r(cv::Mat::zeros(3, 1, CV_64F)),
-		cam_t(cv::Mat::zeros(3, 1, CV_64F))
+		cam_t(cv::Mat::zeros(3, 1, CV_64F)),
+		prev_timestamp(0.0),
+		vel(cv::Mat::zeros(3, 1, CV_64F)),
+		rates(cv::Mat::zeros(3, 1, CV_64F))
 {
 	this->key_r.at<double>(0, 0) = -M_PI / 2.0;
 	PROFILER_ENABLE;
@@ -100,7 +114,8 @@ void EVO::getPose(cv::Mat &rvec, cv::Mat &tvec) {
 void EVO::updateImageDepth(
 		const cv::Mat &image,
 		const cv::Mat &depth,
-		cv::InputArray intrinsic) {
+		cv::InputArray intrinsic,
+		double timestamp) {
 	PROFILER_START(updateImageDepth);
 	if(this->keyframe.size() > 0) {
 		PROFILER_START(updatePose);
@@ -130,7 +145,7 @@ void EVO::updateImageDepth(
 //		filter_vector(this->keyframe, is_inlier);
 //		PROFILER_END();
 
-		// Compute pose
+		// Compute pose and rates
 		PROFILER_START(compute_pose);
 		cv::Mat rvec; // Note: rvec, tvec are keyframe pose in camera frame.
 		cv::Mat tvec;
@@ -146,25 +161,49 @@ void EVO::updateImageDepth(
 				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
 		// Update pose of camera in keyframe
 		if(this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init) {
-			cv::Mat R;
-			cv::Rodrigues(rvec, R);
-			cv::transpose(R, R);
-			this->cam_t = -R * tvec;
-			cv::Rodrigues(R, this->cam_r);
-		}
+			cv::Mat R, prev_cam_t, prev_cam_r;
+			// Keep track of previous cam pose
+			this->cam_t.copyTo(prev_cam_t);
+			this->cam_r.copyTo(prev_cam_r);
+			// Update current cam pose
+			invert_pose(rvec, tvec, this->cam_r, this->cam_t);
+			// Express previous cam frame in current cam frame
+			// H_c,c-1 = H_c,k * H_k,c-1
+			cv::Mat cam_r_inv, cam_t_inv, step_t, step_r;
+			invert_pose(this->cam_r, this->cam_t, cam_r_inv, cam_t_inv);
+			cv::composeRT(prev_cam_r, prev_cam_t, cam_r_inv, cam_t_inv,
+					step_r, step_t);
+			// Calculate rates
+			double dt = (timestamp - this->prev_timestamp);
+			this->vel = -step_t / dt;
+			this->rates = -step_r / dt;
 #ifdef DEBUG
-		else {
-			std::cerr << "WARNING! Not enough features left: "
-					<< this->tracked_pts.size() << ". Ignoring..." << std::endl;
-		}
+			std::cerr << "vel = " << this->vel << std::endl;
+			std::cerr << "rates = " << this->rates << std::endl;
 #endif
+		} else {
+			// Lost track of features
+			// Assume constant rates and update pose
+			std::cerr << "WARNING! Not enough features left: " << this->tracked_pts.size() << std::endl;
+			std::cerr << "Propagating position using previous rates..." << std::endl;
+			// H_k,c = H_k,c-1 * H_c-1,c
+			double dt = (timestamp - this->prev_timestamp);
+			cv::Mat step_t, step_r; // H_c,c-1
+			step_t = -this->vel * dt;
+			step_r = -this->rates * dt;
+			invert_pose(step_r, step_t, step_r, step_t); // step_r, _t is now H_c-1,c
+			cv::composeRT(step_r, step_t, this->cam_r, this->cam_t,
+					this->cam_r, this->cam_t);
+		}
 		PROFILER_END();
 #ifdef DEBUG
 		std::cerr << "Remaining points = " << this->tracked_pts.size() << std::endl;
 #endif
+
 		// Keep track of previous data
 		PROFILER_START(copy);
 		image.copyTo(this->prev_img);
+		this->prev_timestamp = timestamp;
 		PROFILER_END();
 		// If not new keyframe
 		//	Predict features
