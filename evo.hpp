@@ -12,7 +12,7 @@ public:
 	void getPose(cv::Mat &rvec, cv::Mat &tvec);
 	void getRates(cv::Mat &vel, cv::Mat &rates);
 
-	void updateIMU(void);
+	void updateIMU(const cv::Mat &rates, double timestamp);
 	void updateImageDepth(
 			const cv::Mat &image,
 			const cv::Mat &depth,
@@ -43,6 +43,11 @@ private:
 	std::vector<cv::Point2f> tracked_pts;
 	cv::Mat prev_img;
 	double prev_timestamp;
+
+	cv::Mat imu_R; // Orientation matrix of IMU in previous camera frame, i.e. p_imu = imu_R * p_c
+	cv::Mat imu_bias; // Estimated IMU angular velocity bias
+	double imu_bias_gain; // Bias estimator gain [0..1]
+	double imu_prev_timestamp;
 
 	cv::Mat vel; // Translational velocity in current camera frame
 	cv::Mat rates; // Angular velocity in current camera frame

@@ -7,16 +7,17 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
+#endif // DEBUG
 
-#include <cstdio>
+// Profiler. Placed outside DEBUG to provide empty macro's
 #include <unistd.h>
+#include <cstdio>
 void profile_printf(const char *s) {
 	printf("PROFILER: %s", s);
 }
 #define LIB_PROFILER_IMPLEMENTATION
 #define LIB_PROFILER_PRINTF profile_printf
-#endif // DEBUG
-#include "libProfiler/libProfiler.h" // Included outside DEBUG to provide empty macros
+#include "libProfiler/libProfiler.h"
 
 
 namespace {
@@ -94,6 +95,10 @@ EVO::EVO(void) :
 		cam_r(cv::Mat::zeros(3, 1, CV_64F)),
 		cam_t(cv::Mat::zeros(3, 1, CV_64F)),
 		prev_timestamp(0.0),
+		imu_R(cv::Mat::eye(3, 3, CV_64F)),
+		imu_bias(cv::Mat::zeros(3, 1, CV_64F)),
+		imu_bias_gain(0.1),
+		imu_prev_timestamp(0.0),
 		vel(cv::Mat::zeros(3, 1, CV_64F)),
 		rates(cv::Mat::zeros(3, 1, CV_64F))
 {
@@ -117,6 +122,21 @@ void EVO::getRates(cv::Mat &vel, cv::Mat &rates) {
 }
 
 
+void EVO::updateIMU(const cv::Mat &rates, double timestamp) {
+	// Update orientation prediction
+	double dt = timestamp - this->imu_prev_timestamp;
+	cv::Mat R;
+	cv::Rodrigues((rates - this->imu_bias) * dt, R); // R_imu-1,imu
+	cv::transpose(R,  R); // R_imu,imu-1
+	this->imu_R = R * this->imu_R; // R_imu,imu-N
+	this->imu_prev_timestamp = timestamp;
+	// Update IMU bias
+	// TODO find better method!
+	cv::Mat error = rates - this->rates;
+	this->imu_bias += this->imu_bias_gain * (error - this->imu_bias);
+}
+
+
 void EVO::updateImageDepth(
 		const cv::Mat &image,
 		const cv::Mat &depth,
@@ -125,6 +145,42 @@ void EVO::updateImageDepth(
 	PROFILER_START(updateImageDepth);
 	if(this->keyframe.size() > 0) {
 		PROFILER_START(updatePose);
+
+		// Predict feature positions
+		PROFILER_START(predict);
+		// Predict rotation matrix
+		cv::Mat R;
+		if(this->imu_prev_timestamp > this->prev_timestamp) {
+			// Use available IMU data
+			R = this->imu_R;
+			std::cerr << "imu_R = " << this->imu_R << std::endl;
+			// Zero IMU orientation relative to the new image
+			this->imu_R = cv::Mat::eye(3, 3, CV_64F);
+		} else {
+			// Assume constant angular rate
+			double dt = (timestamp - this->prev_timestamp);
+			cv::Rodrigues(dt * this->rates, R); // R_c-1,c
+			cv::transpose(R, R); // R_c,c-1
+		}
+		// Rotate feature positions
+		// Create 3D keypoint matrix
+//		cv::Mat intr = intrinsic.getMat();
+//		assert(intr.type() == CV_64F);
+//		assert(intr.size() == cv::Size(3, 3));
+//		const double fx = intr.at<double>(0, 0);
+//		const double fy = intr.at<double>(1, 1);
+//		cv::Mat tracked_pts_mat(this->tracked_pts.size(), 2, CV_32F,
+//				this->tracked_pts.data());
+//		cv::Mat pts_3d = tracked_pts_mat.clone();
+//		cv::transpose(pts_3d, pts_3d);
+//		pts_3d.row(0) /= fx;
+//		pts_3d.row(1) /= fy;
+//		cv::vconcat(pts_3d, cv::Mat::ones(1, pts_3d.size().width, CV_32F), pts_3d);
+//		pts_3d = R * pts_3d;
+//
+//		std::cerr << "pts_3d.size() = " << pts_3d.size() << std::endl;
+//		std::cerr << "pts_3d = " << pts_3d << std::endl;
+		PROFILER_END();
 
 		// Track features
 		PROFILER_START(track);
@@ -221,7 +277,7 @@ void EVO::updateImageDepth(
 		this->updateKeyframe(image, depth, intrinsic);
 	}
 
-	std::cerr << "Keypoints: " << this->keyframe.size() << std::endl;
+	// std::cerr << "Keypoints: " << this->keyframe.size() << std::endl;
 	image.copyTo(this->prev_img); // XXX
 
 	PROFILER_END(); // updateImageDepth
