@@ -148,7 +148,6 @@ void EVO::updateImageDepth(
 
 		// Predict feature positions
 		PROFILER_START(predict);
-		// Predict rotation matrix
 		cv::Mat R;
 		if(this->imu_prev_timestamp > this->prev_timestamp) {
 			// Use available IMU data
@@ -162,24 +161,45 @@ void EVO::updateImageDepth(
 			cv::Rodrigues(dt * this->rates, R); // R_c-1,c
 			cv::transpose(R, R); // R_c,c-1
 		}
-		// Rotate feature positions
-		// Create 3D keypoint matrix
+		// Rotate keypoints
+		cv::Mat intr = intrinsic.getMat();
+		assert(intr.type() == CV_64F);
+		assert(intr.size() == cv::Size(3, 3));
+		const double fx = intr.at<double>(0, 0);
+		const double fy = intr.at<double>(1, 1);
+		const double cx = intr.at<double>(0, 2);
+		const double cy = intr.at<double>(1, 2);
+		assert(fx != 0 && fy != 0 && cx != 0 && cy != 0);
+		cv::Mat pts_3d;
+		cv::convertPointsToHomogeneous(this->tracked_pts, pts_3d);
+		pts_3d = cv::Mat(this->tracked_pts.size(), 3, CV_32FC1, pts_3d.data); // Otherwise pts_3d is a column matrix of Point2fs
+		pts_3d.col(0) = (pts_3d.col(0) - cx) / fx;
+		pts_3d.col(1) = (pts_3d.col(1) - cy) / fy;
+		R.convertTo(R, CV_32F);
+		pts_3d = pts_3d * R.t(); // XXX Does not seem to work, pts(:,2) remains 1.0
+		std::cerr << "pts_3d.size() = " << pts_3d.size() << std::endl;
+		std::cerr << "pts_3d = " << pts_3d << std::endl;
+//		// Assumes small rotation between camera frames
+//		assert(rates.type() == CV_64F);
 //		cv::Mat intr = intrinsic.getMat();
 //		assert(intr.type() == CV_64F);
 //		assert(intr.size() == cv::Size(3, 3));
 //		const double fx = intr.at<double>(0, 0);
 //		const double fy = intr.at<double>(1, 1);
-//		cv::Mat tracked_pts_mat(this->tracked_pts.size(), 2, CV_32F,
-//				this->tracked_pts.data());
-//		cv::Mat pts_3d = tracked_pts_mat.clone();
-//		cv::transpose(pts_3d, pts_3d);
-//		pts_3d.row(0) /= fx;
-//		pts_3d.row(1) /= fy;
-//		cv::vconcat(pts_3d, cv::Mat::ones(1, pts_3d.size().width, CV_32F), pts_3d);
-//		pts_3d = R * pts_3d;
-//
-//		std::cerr << "pts_3d.size() = " << pts_3d.size() << std::endl;
-//		std::cerr << "pts_3d = " << pts_3d << std::endl;
+//		const double cx = intr.at<double>(0, 2);
+//		const double cy = intr.at<double>(1, 2);
+//		assert(fx != 0 && fy != 0 && cx != 0 && cy != 0);
+//		for(int i = 0; i < this->tracked_pts.size(); ++i) {
+//			double A = rates.at<double>(0, 0);
+//			double B = rates.at<double>(1, 0);
+//			double C = rates.at<double>(2, 0);
+//			double x = (this->tracked_pts[i].x - cx) / fx;
+//			double y = (this->tracked_pts[i].y - cy) / fy;
+//			x += (-B + C*y - x*(-A*y + B*x));
+//			y += (-C*x + A - y*(-A*y + B*x));
+//			this->tracked_pts[i].x = x * fx + cx;
+//			this->tracked_pts[i].y = y * fy + cy;
+//		}
 		PROFILER_END();
 
 		// Track features
