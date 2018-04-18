@@ -9,8 +9,8 @@ public:
 	EVO(void);
 	virtual ~EVO(void);
 
-	void getPose(cv::Mat &rvec, cv::Mat &tvec);
-	void getRates(cv::Mat &vel, cv::Mat &rates);
+	bool getPose(cv::Mat &rvec, cv::Mat &tvec);
+	bool getRates(cv::Mat &vel, cv::Mat &rates);
 
 	void updateIMU(const cv::Mat &rates, double timestamp);
 	void updateImageDepth(
@@ -51,6 +51,7 @@ private:
 
 	cv::Mat vel; // Translational velocity in current camera frame
 	cv::Mat rates; // Angular velocity in current camera frame
+	bool estimate_valid;
 };
 
 }

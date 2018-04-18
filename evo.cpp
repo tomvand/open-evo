@@ -100,7 +100,8 @@ EVO::EVO(void) :
 		imu_bias_gain(0.0), // XXX
 		imu_prev_timestamp(0.0),
 		vel(cv::Mat::zeros(3, 1, CV_64F)),
-		rates(cv::Mat::zeros(3, 1, CV_64F))
+		rates(cv::Mat::zeros(3, 1, CV_64F)),
+		estimate_valid(false)
 {
 	this->key_r.at<double>(0, 0) = -M_PI / 2.0;
 	PROFILER_ENABLE;
@@ -110,15 +111,17 @@ EVO::EVO(void) :
 EVO::~EVO(void) { }
 
 
-void EVO::getPose(cv::Mat &rvec, cv::Mat &tvec) {
+bool EVO::getPose(cv::Mat &rvec, cv::Mat &tvec) {
 	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
 			rvec, tvec);
+	return this->estimate_valid;
 }
 
 
-void EVO::getRates(cv::Mat &vel, cv::Mat &rates) {
+bool EVO::getRates(cv::Mat &vel, cv::Mat &rates) {
 	this->vel.copyTo(vel);
 	this->rates.copyTo(rates);
+	return this->estimate_valid;
 }
 
 
@@ -219,7 +222,9 @@ void EVO::updateImageDepth(
 		cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
 				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
 		// Update pose of camera in keyframe
-		if(this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init && dt > 0.0) {
+		this->estimate_valid = this->tracked_pts.size()
+				> this->valid_thres * this->keypts_at_keyframe_init;
+		if(this->estimate_valid && dt > 0.0) {
 			cv::Mat R, prev_cam_t, prev_cam_r;
 			// Keep track of previous cam pose
 			this->cam_t.copyTo(prev_cam_t);
