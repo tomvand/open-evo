@@ -97,7 +97,7 @@ EVO::EVO(void) :
 		prev_timestamp(0.0),
 		imu_R(cv::Mat::eye(3, 3, CV_64F)),
 		imu_bias(cv::Mat::zeros(3, 1, CV_64F)),
-		imu_bias_gain(0.1),
+		imu_bias_gain(0.0), // XXX
 		imu_prev_timestamp(0.0),
 		vel(cv::Mat::zeros(3, 1, CV_64F)),
 		rates(cv::Mat::zeros(3, 1, CV_64F))
@@ -123,6 +123,9 @@ void EVO::getRates(cv::Mat &vel, cv::Mat &rates) {
 
 
 void EVO::updateIMU(const cv::Mat &rates, double timestamp) {
+	// Sanity checks
+	if(timestamp < this->prev_timestamp) return; // Ignore IMU data before latest image
+	if(this->imu_prev_timestamp == 0.0) this->imu_prev_timestamp = timestamp; // Late initialization
 	// Update orientation prediction
 	double dt = timestamp - this->imu_prev_timestamp;
 	cv::Mat R;
@@ -146,60 +149,34 @@ void EVO::updateImageDepth(
 	if(this->keyframe.size() > 0) {
 		PROFILER_START(updatePose);
 
+		// Calculate timestep
+		if(this->prev_timestamp == 0.0) this->prev_timestamp = timestamp; // Late initialization
+		double dt = timestamp - this->prev_timestamp;
+
 		// Predict feature positions
 		PROFILER_START(predict);
-		cv::Mat R;
+		cv::Mat R; // Should be R_c,c-1
 		if(this->imu_prev_timestamp > this->prev_timestamp) {
 			// Use available IMU data
-			R = this->imu_R;
+			this->imu_R.copyTo(R);
 			std::cerr << "imu_R = " << this->imu_R << std::endl;
+			std::cerr << "imu_bias = " << this->imu_bias << std::endl;
 			// Zero IMU orientation relative to the new image
 			this->imu_R = cv::Mat::eye(3, 3, CV_64F);
 		} else {
 			// Assume constant angular rate
-			double dt = (timestamp - this->prev_timestamp);
-			cv::Rodrigues(dt * this->rates, R); // R_c-1,c
-			cv::transpose(R, R); // R_c,c-1
+			R = cv::Mat::eye(3, 3, CV_64F);
+//			cv::Rodrigues(dt * this->rates, R); // R_c-1,c
+//			cv::transpose(R, R); // R_c,c-1
 		}
-		// Rotate keypoints
-		cv::Mat intr = intrinsic.getMat();
-		assert(intr.type() == CV_64F);
-		assert(intr.size() == cv::Size(3, 3));
-		const double fx = intr.at<double>(0, 0);
-		const double fy = intr.at<double>(1, 1);
-		const double cx = intr.at<double>(0, 2);
-		const double cy = intr.at<double>(1, 2);
-		assert(fx != 0 && fy != 0 && cx != 0 && cy != 0);
-		cv::Mat pts_3d;
-		cv::convertPointsToHomogeneous(this->tracked_pts, pts_3d);
-		pts_3d = cv::Mat(this->tracked_pts.size(), 3, CV_32FC1, pts_3d.data); // Otherwise pts_3d is a column matrix of Point2fs
-		pts_3d.col(0) = (pts_3d.col(0) - cx) / fx;
-		pts_3d.col(1) = (pts_3d.col(1) - cy) / fy;
-		R.convertTo(R, CV_32F);
-		pts_3d = pts_3d * R.t(); // XXX Does not seem to work, pts(:,2) remains 1.0
-		std::cerr << "pts_3d.size() = " << pts_3d.size() << std::endl;
-		std::cerr << "pts_3d = " << pts_3d << std::endl;
-//		// Assumes small rotation between camera frames
-//		assert(rates.type() == CV_64F);
-//		cv::Mat intr = intrinsic.getMat();
-//		assert(intr.type() == CV_64F);
-//		assert(intr.size() == cv::Size(3, 3));
-//		const double fx = intr.at<double>(0, 0);
-//		const double fy = intr.at<double>(1, 1);
-//		const double cx = intr.at<double>(0, 2);
-//		const double cy = intr.at<double>(1, 2);
-//		assert(fx != 0 && fy != 0 && cx != 0 && cy != 0);
-//		for(int i = 0; i < this->tracked_pts.size(); ++i) {
-//			double A = rates.at<double>(0, 0);
-//			double B = rates.at<double>(1, 0);
-//			double C = rates.at<double>(2, 0);
-//			double x = (this->tracked_pts[i].x - cx) / fx;
-//			double y = (this->tracked_pts[i].y - cy) / fy;
-//			x += (-B + C*y - x*(-A*y + B*x));
-//			y += (-C*x + A - y*(-A*y + B*x));
-//			this->tracked_pts[i].x = x * fx + cx;
-//			this->tracked_pts[i].y = y * fy + cy;
-//		}
+		// Apply rotation to tracked points
+		cv::Mat intr, M;
+		intr = intrinsic.getMat();
+		M = intr * R * (intr.inv());
+		std::cerr << "R = " << R << std::endl;
+		std::cerr << "M = " << M << std::endl;
+		std::cerr << "M.type() = " << M.type() << std::endl;
+		cv::perspectiveTransform(this->tracked_pts, this->tracked_pts, M);
 		PROFILER_END();
 
 		// Track features
@@ -208,7 +185,7 @@ void EVO::updateImageDepth(
 		std::vector<uchar> is_tracked;
 		cv::Mat err;
 		cv::calcOpticalFlowPyrLK(this->prev_img, image, prev_pts, this->tracked_pts,
-				is_tracked, err, cv::Size(15,15), 1); // See Kelly et al., 2008 for window size.
+				is_tracked, err, cv::Size(15, 15)); // See Kelly et al., 2008 for window size.
 		// Remove keypoints that were lost during tracking
 		filter_vector(prev_pts, is_tracked);
 		filter_vector(this->tracked_pts, is_tracked);
@@ -242,7 +219,7 @@ void EVO::updateImageDepth(
 		cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
 				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
 		// Update pose of camera in keyframe
-		if(this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init) {
+		if(this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init && dt > 0.0) {
 			cv::Mat R, prev_cam_t, prev_cam_r;
 			// Keep track of previous cam pose
 			this->cam_t.copyTo(prev_cam_t);
@@ -256,7 +233,6 @@ void EVO::updateImageDepth(
 			cv::composeRT(prev_cam_r, prev_cam_t, cam_r_inv, cam_t_inv,
 					step_r, step_t);
 			// Calculate rates
-			double dt = (timestamp - this->prev_timestamp);
 			this->vel = -step_t / dt;
 			this->rates = -step_r / dt;
 #ifdef DEBUG
@@ -269,7 +245,6 @@ void EVO::updateImageDepth(
 			std::cerr << "WARNING! Not enough features left: " << this->tracked_pts.size() << std::endl;
 			std::cerr << "Propagating position using previous rates..." << std::endl;
 			// H_k,c = H_k,c-1 * H_c-1,c
-			double dt = (timestamp - this->prev_timestamp);
 			cv::Mat step_t, step_r; // H_c,c-1
 			step_t = -this->vel * dt;
 			step_r = -this->rates * dt;
@@ -289,7 +264,7 @@ void EVO::updateImageDepth(
 		PROFILER_END();
 		// If not new keyframe
 		//	Predict features
-		PROFILER_END(); // update_pose
+		PROFILER_END(); // updatePose
 		//	return; // Skip keyframe update
 	}
 
