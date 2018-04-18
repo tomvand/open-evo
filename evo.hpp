@@ -29,6 +29,13 @@ private:
 	double valid_thres;
 	int keypts_at_keyframe_init;
 
+	void predictKeypoints(
+			cv::InputArray intrinsic,
+			std::vector<cv::Point2f> &predicted_pts,
+			double dt);
+	void trackKeypoints(
+			const cv::Mat &image,
+			const std::vector<cv::Point2f> &predicted_pts);
 	void updateKeyframe(
 			const cv::Mat &image,
 			const cv::Mat &depth,

@@ -156,47 +156,10 @@ void EVO::updateImageDepth(
 		if(this->prev_timestamp == 0.0) this->prev_timestamp = timestamp; // Late initialization
 		double dt = timestamp - this->prev_timestamp;
 
-		// Predict feature positions
-		PROFILER_START(predict);
-		cv::Mat R; // Should be R_c,c-1
-		if(this->imu_prev_timestamp > this->prev_timestamp) {
-			// Use available IMU data
-			this->imu_R.copyTo(R);
-			std::cerr << "imu_R = " << this->imu_R << std::endl;
-			std::cerr << "imu_bias = " << this->imu_bias << std::endl;
-			// Zero IMU orientation relative to the new image
-			this->imu_R = cv::Mat::eye(3, 3, CV_64F);
-		} else {
-			// Assume constant angular rate
-			R = cv::Mat::eye(3, 3, CV_64F);
-//			cv::Rodrigues(dt * this->rates, R); // R_c-1,c
-//			cv::transpose(R, R); // R_c,c-1
-		}
-		// Apply rotation to tracked points
-		cv::Mat intr, M;
-		intr = intrinsic.getMat();
-		M = intr * R * (intr.inv());
-		std::cerr << "R = " << R << std::endl;
-		std::cerr << "M = " << M << std::endl;
-		std::cerr << "M.type() = " << M.type() << std::endl;
-		cv::perspectiveTransform(this->tracked_pts, this->tracked_pts, M);
-		PROFILER_END();
-
-		// Track features
-		PROFILER_START(track);
-		std::vector<cv::Point2f> prev_pts(this->tracked_pts);
-		std::vector<uchar> is_tracked;
-		cv::Mat err;
-		cv::calcOpticalFlowPyrLK(this->prev_img, image, prev_pts, this->tracked_pts,
-				is_tracked, err, cv::Size(15, 15)); // See Kelly et al., 2008 for window size.
-		// Remove keypoints that were lost during tracking
-		filter_vector(prev_pts, is_tracked);
-		filter_vector(this->tracked_pts, is_tracked);
-		filter_vector(this->keyframe, is_tracked);
-		PROFILER_END();
-#ifdef DEBUG
-		std::cerr << "Tracked points: " << this->tracked_pts.size() << std::endl;
-#endif
+		// Track keypoints
+		std::vector<cv::Point2f> predicted_pts;
+		this->predictKeypoints(intrinsic, predicted_pts, dt);
+		this->trackKeypoints(image, predicted_pts);
 
 		// Filter outliers
 //		PROFILER_START(fcheck);
@@ -209,21 +172,33 @@ void EVO::updateImageDepth(
 
 		// Compute pose and rates
 		PROFILER_START(compute_pose);
+		// Coarse initial estimate
 		cv::Mat rvec; // Note: rvec, tvec are keyframe pose in camera frame.
 		cv::Mat tvec;
-		std::vector<int> inlier_idxs;
-		// Coarse estimation using P3P, find inliers
-		cv::solvePnPRansac(this->keyframe, this->tracked_pts, intrinsic,
-				std::vector<double>(), rvec, tvec, false, 100, 8.0, 100, inlier_idxs, CV_P3P);
-		// Remove outliers
-		select_vector(this->keyframe, inlier_idxs);
-		select_vector(this->tracked_pts, inlier_idxs);
+		this->estimate_valid =
+						this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init;
+		if(this->estimate_valid) {
+			std::vector<int> inlier_idxs;
+			// Coarse estimation using P3P, find inliers
+			cv::solvePnPRansac(this->keyframe, this->tracked_pts, intrinsic,
+					std::vector<double>(), rvec, tvec, false, 100, 8.0, 100, inlier_idxs, CV_P3P);
+			// Remove outliers
+			select_vector(this->keyframe, inlier_idxs);
+			select_vector(this->tracked_pts, inlier_idxs);
+			// Verify enough inliers remain
+			this->estimate_valid =
+					this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init;
+		}
 		// Fine pose estimation
-		cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
-				std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
+		if(this->estimate_valid) {
+			cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
+							std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
+			// Verify enough inliers remain
+			this->estimate_valid =
+					this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init;
+		}
+
 		// Update pose of camera in keyframe
-		this->estimate_valid = this->tracked_pts.size()
-				> this->valid_thres * this->keypts_at_keyframe_init;
 		if(this->estimate_valid && dt > 0.0) {
 			cv::Mat R, prev_cam_t, prev_cam_r;
 			// Keep track of previous cam pose
@@ -305,6 +280,80 @@ void EVO::updateImageDepth(
 #endif
 
 	LogProfiler();
+}
+
+
+/**
+ * Predict next keypoint positions
+ *
+ * Predict keypoint positions using IMU data, or assuming constant angular
+ * rates. No keypoints are removed during this step
+ * @param intrinsic Camera intrinsic matrix
+ * @param predicted_pts Output: contains predicted positions
+ */
+void EVO::predictKeypoints(
+			cv::InputArray intrinsic,
+			std::vector<cv::Point2f> &predicted_pts,
+			double dt) {
+	PROFILER_START(predict);
+	cv::Mat R; // Should be R_c,c-1
+	if(this->imu_prev_timestamp > this->prev_timestamp) {
+		// Use available IMU data
+		this->imu_R.copyTo(R);
+		std::cerr << "imu_R = " << this->imu_R << std::endl;
+		std::cerr << "imu_bias = " << this->imu_bias << std::endl;
+		// Zero IMU orientation relative to the new image
+		this->imu_R = cv::Mat::eye(3, 3, CV_64F); // TODO move away from this function
+	} else {
+		// Assume constant angular rate
+//		R = cv::Mat::eye(3, 3, CV_64F);
+		cv::Rodrigues(dt * this->rates, R); // R_c-1,c
+		cv::transpose(R, R); // R_c,c-1
+	}
+	// Apply rotation to tracked points
+	cv::Mat intr, M;
+	intr = intrinsic.getMat();
+	M = intr * R * (intr.inv());
+#ifdef DEBUG
+	std::cerr << "R = " << R << std::endl;
+	std::cerr << "M = " << M << std::endl;
+	std::cerr << "M.type() = " << M.type() << std::endl;
+#endif
+	cv::perspectiveTransform(this->tracked_pts, predicted_pts, M);
+	PROFILER_END();
+}
+
+
+/**
+ * Track keypoints
+ *
+ * Tracks the this->tracked_pts keypoints from the previous image this->prev_img
+ * to the new image 'image'. predicted_pts is used as an initial guess for the
+ * new keypoint positions.
+ * Keypoints that were lost during tracking are removed from the tracked_pts and
+ * keyframe.
+ *
+ * @param image New input image
+ * @param predicted_pts Predicted new keypoint positions
+ */
+void EVO::trackKeypoints(
+			const cv::Mat &image,
+			const std::vector<cv::Point2f> &predicted_pts) {
+	PROFILER_START(track);
+	std::vector<cv::Point2f> prev_pts(this->tracked_pts);
+	this->tracked_pts = predicted_pts;
+	std::vector<uchar> is_tracked;
+	cv::Mat err;
+	cv::calcOpticalFlowPyrLK(this->prev_img, image, prev_pts, this->tracked_pts,
+			is_tracked, err, cv::Size(15, 15)); // See Kelly et al., 2008 for window size.
+	// Remove keypoints that were lost during tracking
+	filter_vector(prev_pts, is_tracked);
+	filter_vector(this->tracked_pts, is_tracked);
+	filter_vector(this->keyframe, is_tracked);
+	PROFILER_END();
+#ifdef DEBUG
+	std::cerr << "Tracked points: " << this->tracked_pts.size() << std::endl;
+#endif
 }
 
 
