@@ -21,13 +21,17 @@ public:
 //	void updateImagePair(void); // TODO
 //	void updateImageDisparity(void); // TODO
 
+	inline void setTargetKeypts(int num) { this->target_keypts = num; }
+	inline void setMinKeypts(int num) { this->min_keypts = num; }
+	inline void setNearClip(double nc) { this->near_clip = nc; }
+	inline void setKeyframeThres(double thres) { this->keyframe_thres = thres; }
+
 private:
 	int target_keypts;
 	double near_clip;
-
 	double keyframe_thres;
-	double valid_thres;
-	int keypts_at_keyframe_init;
+	int min_keypts;
+
 
 	void predictKeypoints(
 			cv::InputArray intrinsic,
@@ -44,6 +48,7 @@ private:
 	cv::Ptr<cv::FeatureDetector> detector;
 
 	std::vector<cv::Point3f> keyframe; // Keypoints in keyframe frame
+	int keyframe_initial_size; // Initial number of points in keyframe
 	cv::Mat key_t, key_r; // Pose of keyframe in world, i.e. p_w = [R(key_r)|key_t] * p_k
 	cv::Mat cam_t, cam_r; // Pose of camera in keyframe, i.e. p_k = [R(cam_r)|cam_t] * p_c
 

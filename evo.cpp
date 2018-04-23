@@ -86,10 +86,11 @@ EVO::EVO(void) :
 				6,
 				8)),
 		target_keypts(350),
+		min_keypts(50),
 		near_clip(1.5),
 		keyframe_thres(0.8),
-		valid_thres(0.25),
-		keypts_at_keyframe_init(9999),
+
+		keyframe_initial_size(9999),
 		key_r(cv::Mat::zeros(3, 1, CV_64F)),
 		key_t(cv::Mat::zeros(3, 1, CV_64F)),
 		cam_r(cv::Mat::zeros(3, 1, CV_64F)),
@@ -175,8 +176,7 @@ void EVO::updateImageDepth(
 		// Coarse initial estimate
 		cv::Mat rvec; // Note: rvec, tvec are keyframe pose in camera frame.
 		cv::Mat tvec;
-		this->estimate_valid =
-						this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init;
+		this->estimate_valid = this->tracked_pts.size() > this->min_keypts;
 		if(this->estimate_valid) {
 			std::vector<int> inlier_idxs;
 			// Coarse estimation using P3P, find inliers
@@ -186,16 +186,14 @@ void EVO::updateImageDepth(
 			select_vector(this->keyframe, inlier_idxs);
 			select_vector(this->tracked_pts, inlier_idxs);
 			// Verify enough inliers remain
-			this->estimate_valid =
-					this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init;
+			this->estimate_valid = this->tracked_pts.size() > this->min_keypts;
 		}
 		// Fine pose estimation
 		if(this->estimate_valid) {
 			cv::solvePnP(this->keyframe, this->tracked_pts, intrinsic,
 							std::vector<double>(), rvec, tvec, true, CV_ITERATIVE);
 			// Verify enough inliers remain
-			this->estimate_valid =
-					this->tracked_pts.size() > this->valid_thres * this->keypts_at_keyframe_init;
+			this->estimate_valid = this->tracked_pts.size() > this->min_keypts;
 		}
 
 		// Update pose of camera in keyframe
@@ -250,7 +248,7 @@ void EVO::updateImageDepth(
 		//	return; // Skip keyframe update
 	}
 
-	if(this->keyframe.size() < this->keyframe_thres * this->keypts_at_keyframe_init) {
+	if(this->keyframe.size() < this->keyframe_thres * this->keyframe_initial_size) {
 		this->updateKeyframe(image, depth, intrinsic);
 	}
 
@@ -433,7 +431,7 @@ void EVO::updateKeyframe(
 		this->keyframe[i].y = (this->tracked_pts[i].y - cy) / fy * z;
 		this->keyframe[i].z = z;
 	}
-	this->keypts_at_keyframe_init = this->keyframe.size();
+	this->keyframe_initial_size = this->keyframe.size();
 	PROFILER_END();
 
 	// Update keyframe pose in world, zero cam pose in keyframe
