@@ -23,14 +23,14 @@ public:
 
 	inline void setTargetKeypts(int num) { this->target_keypts = num; }
 	inline void setMinKeypts(int num) { this->min_keypts = num; }
-	inline void setNearClip(double nc) { this->near_clip = nc; }
 	inline void setKeyframeThres(double thres) { this->keyframe_thres = thres; }
+	inline void setNearClip(double nc) { this->near_clip = nc; }
 
 private:
 	int target_keypts;
-	double near_clip;
-	double keyframe_thres;
 	int min_keypts;
+	double keyframe_thres;
+	double near_clip;
 
 
 	void predictKeypoints(
