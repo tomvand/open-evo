@@ -21,10 +21,12 @@ public:
 //	void updateImagePair(void); // TODO
 //	void updateImageDisparity(void); // TODO
 
-	inline void setTargetKeypts(int num) { this->target_keypts = num; }
-	inline void setMinKeypts(int num) { this->min_keypts = num; }
-	inline void setKeyframeThres(double thres) { this->keyframe_thres = thres; }
-	inline void setNearClip(double nc) { this->near_clip = nc; }
+	void setTargetKeypts(int num);
+	void setMinKeypts(int num);
+	void setKeyframeThres(double thres);
+	void setNearClip(double nc);
+	void setGridRows(int rows);
+	void setGridCols(int cols);
 
 private:
 	int target_keypts;

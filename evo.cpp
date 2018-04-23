@@ -112,6 +112,31 @@ EVO::EVO(void) :
 EVO::~EVO(void) { }
 
 
+void EVO::setTargetKeypts(int num) {
+	this->target_keypts = num;
+}
+
+void EVO::setMinKeypts(int num) {
+	this->min_keypts = num;
+}
+
+void EVO::setKeyframeThres(double thres) {
+	this->keyframe_thres = thres;
+}
+
+void EVO::setNearClip(double nc) {
+	this->near_clip = nc;
+}
+
+void EVO::setGridRows(int rows) {
+	this->detector->set("gridRows", rows);
+}
+
+void EVO::setGridCols(int cols) {
+	this->detector->set("gridCols", cols);
+}
+
+
 bool EVO::getPose(cv::Mat &rvec, cv::Mat &tvec) {
 	cv::composeRT(this->cam_r, this->cam_t, this->key_r, this->key_t,
 			rvec, tvec);
