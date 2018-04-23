@@ -222,8 +222,10 @@ void EVO::updateImageDepth(
 		} else {
 			// Lost track of features
 			// Assume constant rates and update pose
+#ifdef DEBUG
 			std::cerr << "WARNING! Not enough features left: " << this->tracked_pts.size() << std::endl;
 			std::cerr << "Propagating position using previous rates..." << std::endl;
+#endif
 			// H_k,c = H_k,c-1 * H_c-1,c
 			cv::Mat step_t, step_r; // H_c,c-1
 			step_t = -this->vel * dt;
@@ -300,8 +302,10 @@ void EVO::predictKeypoints(
 	if(this->imu_prev_timestamp > this->prev_timestamp) {
 		// Use available IMU data
 		this->imu_R.copyTo(R);
+#ifdef DEBUG
 		std::cerr << "imu_R = " << this->imu_R << std::endl;
 		std::cerr << "imu_bias = " << this->imu_bias << std::endl;
+#endif
 		// Zero IMU orientation relative to the new image
 		this->imu_R = cv::Mat::eye(3, 3, CV_64F); // TODO move away from this function
 	} else {
