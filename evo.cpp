@@ -85,8 +85,8 @@ EVO::EVO(void) :
 				0, // Set in EVO::updateKeyframe
 				6,
 				8)),
-		target_keypts(350),
-		min_keypts(50),
+		target_keypts(100),
+		min_keypts(20),
 		near_clip(1.5),
 		keyframe_thres(0.8),
 
@@ -185,6 +185,7 @@ void EVO::updateImageDepth(
 		// Track keypoints
 		std::vector<cv::Point2f> predicted_pts;
 		this->predictKeypoints(intrinsic, predicted_pts, dt);
+//		this->tracked_pts = predicted_pts;
 		this->trackKeypoints(image, predicted_pts);
 
 		// Filter outliers
@@ -205,8 +206,10 @@ void EVO::updateImageDepth(
 		if(this->estimate_valid) {
 			std::vector<int> inlier_idxs;
 			// Coarse estimation using P3P, find inliers
+			PROFILER_START(p3p);
 			cv::solvePnPRansac(this->keyframe, this->tracked_pts, intrinsic,
 					std::vector<double>(), rvec, tvec, false, 100, 8.0, 100, inlier_idxs, CV_P3P);
+			PROFILER_END();
 			// Remove outliers
 			select_vector(this->keyframe, inlier_idxs);
 			select_vector(this->tracked_pts, inlier_idxs);
@@ -250,12 +253,12 @@ void EVO::updateImageDepth(
 			std::cerr << "Propagating position using previous rates..." << std::endl;
 #endif
 			// H_k,c = H_k,c-1 * H_c-1,c
-			cv::Mat step_t, step_r; // H_c,c-1
-			step_t = -this->vel * dt;
-			step_r = -this->rates * dt;
-			invert_pose(step_r, step_t, step_r, step_t); // step_r, _t is now H_c-1,c
-			cv::composeRT(step_r, step_t, this->cam_r, this->cam_t,
-					this->cam_r, this->cam_t);
+//			cv::Mat step_t, step_r; // H_c,c-1
+//			step_t = -this->vel * dt;
+//			step_r = -this->rates * dt;
+//			invert_pose(step_r, step_t, step_r, step_t); // step_r, _t is now H_c-1,c
+//			cv::composeRT(step_r, step_t, this->cam_r, this->cam_t,
+//					this->cam_r, this->cam_t);
 		}
 		PROFILER_END();
 #ifdef DEBUG
@@ -371,8 +374,10 @@ void EVO::trackKeypoints(
 	this->tracked_pts = predicted_pts;
 	std::vector<uchar> is_tracked;
 	cv::Mat err;
+	PROFILER_START(pyrlk);
 	cv::calcOpticalFlowPyrLK(this->prev_img, image, prev_pts, this->tracked_pts,
 			is_tracked, err, cv::Size(15, 15)); // See Kelly et al., 2008 for window size.
+	PROFILER_END();
 	// Remove keypoints that were lost during tracking
 	filter_vector(prev_pts, is_tracked);
 	filter_vector(this->tracked_pts, is_tracked);
