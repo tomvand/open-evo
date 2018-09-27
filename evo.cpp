@@ -293,7 +293,7 @@ void EVO::updateImageDepth(
 		//	return; // Skip keyframe update
 	}
 
-	if(this->keyframe.size() < this->keyframe_thres * this->keyframe_initial_size) {
+	if(this->keyframe.size() <= this->keyframe_thres * this->keyframe_initial_size) {
 		this->updateKeyframe(image, depth, intrinsic);
 	}
 
