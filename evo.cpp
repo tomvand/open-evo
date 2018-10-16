@@ -96,6 +96,7 @@ EVO::EVO(void) :
 		target_keypts(100),
 		min_keypts(20),
 		near_clip(1.5),
+		far_clip(50.0),
 		keyframe_thres(0.8),
 
 		keyframe_initial_size(9999),
@@ -134,6 +135,10 @@ void EVO::setKeyframeThres(double thres) {
 
 void EVO::setNearClip(double nc) {
 	this->near_clip = nc;
+}
+
+void EVO::setFarClip(double fc) {
+  this->far_clip = fc;
 }
 
 void EVO::setGridRows(int rows) {
@@ -431,7 +436,7 @@ void EVO::updateKeyframe(
 	cv::Mat image_mask(image.rows, image.cols, CV_8UC1);
 	depth_mask = (depth == depth); 				// Filter unknown (NaN)
 	depth_mask &= (depth > this->near_clip);	// Filter too close (-Inf)
-	depth_mask &= (depth < 1.0e6);				// Filter too far (+Inf)
+	depth_mask &= (depth < this->far_clip); // Filter too far (inaccurate for translation)
 	cv::resize(depth_mask, image_mask, image_mask.size(), 0, 0, cv::INTER_NEAREST);
 	PROFILER_END();
 	PROFILER_START(filter_keyframe);

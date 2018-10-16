@@ -25,6 +25,7 @@ public:
 	void setMinKeypts(int num);
 	void setKeyframeThres(double thres);
 	void setNearClip(double nc);
+	void setFarClip(double fc);
 	void setGridRows(int rows);
 	void setGridCols(int cols);
 
@@ -32,7 +33,7 @@ private:
 	int target_keypts;
 	int min_keypts;
 	double keyframe_thres;
-	double near_clip;
+	double near_clip, far_clip;
 
 
 	void predictKeypoints(
