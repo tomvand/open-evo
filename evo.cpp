@@ -9,7 +9,7 @@
 #include <iomanip>
 #endif // DEBUG
 
-#if CV_VERSION_MAJOR >= 3
+#if !(defined(CV_VERSION_EPOCH) && CV_VERSION_EPOCH == 2)
 #warning("OpenCV 3 support is still experimental")
 #endif
 
@@ -84,7 +84,7 @@ namespace openevo {
 
 
 EVO::EVO(void) :
-#if CV_VERSION_MAJOR < 3
+#if (defined(CV_VERSION_EPOCH) && CV_VERSION_EPOCH == 2)
 		detector(new cv::GridAdaptedFeatureDetector(
 				new cv::FastFeatureDetector(1),
 				0, // Set in EVO::updateKeyframe
@@ -142,13 +142,13 @@ void EVO::setFarClip(double fc) {
 }
 
 void EVO::setGridRows(int rows) {
-#if CV_VERSION_MAJOR < 3
+#if (defined(CV_VERSION_EPOCH) && CV_VERSION_EPOCH == 2)
 	this->detector->set("gridRows", rows);
 #endif
 }
 
 void EVO::setGridCols(int cols) {
-#if CV_VERSION_MAJOR < 3
+#if (defined(CV_VERSION_EPOCH) && CV_VERSION_EPOCH == 2)
 	this->detector->set("gridCols", cols);
 #endif
 }
@@ -224,7 +224,7 @@ void EVO::updateImageDepth(
 			std::vector<int> inlier_idxs;
 			// Coarse estimation using P3P, find inliers
 			PROFILER_START(p3p);
-#if CV_MAJOR_VERSION < 3
+#if (defined(CV_VERSION_EPOCH) && CV_VERSION_EPOCH == 2)
 			cv::solvePnPRansac(this->keyframe, this->tracked_pts, intrinsic,
 					std::vector<double>(), rvec, tvec, false, 100, 8.0, 100, inlier_idxs, CV_P3P);
 #else
@@ -461,7 +461,7 @@ void EVO::updateKeyframe(
 
 	std::vector<cv::KeyPoint> new_kp;
 	std::vector<cv::Point2f> new_pts;
-#if CV_VERSION_MAJOR < 3
+#if (defined(CV_VERSION_EPOCH) && CV_VERSION_EPOCH == 2)
 	this->detector->set("maxTotalKeypoints", num_new_kp);
 	this->detector->detect(image, new_kp, image_mask);
 #else
